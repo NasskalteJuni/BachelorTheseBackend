@@ -1,0 +1,28 @@
+# exclude dependencies, those are in listed in package.json
+node_modules/
+
+# exclude ide workspace directories
+.idea/*
+.settings/*
+.metadata/*
+
+# exclude unwanted file types generated for tests or by the used editor
+*.iml
+*.xml
+*.db
+*.mp4
+*.mp3
+*.swp
+*.tmp
+*.log
+
+
+# exclude config files (which may contain passwords or similar things) except example config files
+*.config
+*.cfg
+config.js
+config.json
+!*.config.example
+!*.cfg.example
+!config.js.example
+!config.json.example

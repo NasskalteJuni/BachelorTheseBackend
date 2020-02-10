@@ -1,0 +1,23 @@
+module.exports = {
+    persistence: {
+        host: '127.0.0.1', // where is your database server running
+        user: '(your assigned user)',
+        password: '(your password)',
+        database: '(the database name)',
+    },
+    turn: {
+        domain: '(on which FQDN is the turnserver running)',
+        sessionDuration: 42 // session lifetime in hours
+    },
+    web: {
+        session: {
+            secret: '(paste a long and secure random string here)',
+            name: '$webrtc_sid',
+            secure: true,
+            duration: 42 // session lifetime in hours without user interaction (has rolling sessions)
+        },
+        domain: '127.0.0.1', // the FQDN of your webserver
+        behindProxy: true, // you probably run node behind nginx which handles ssl
+        port: 8888 // or whatever port you use
+    }
+};
