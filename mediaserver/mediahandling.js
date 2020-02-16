@@ -12,7 +12,8 @@ peers.addEventListener('userconnected', user => {
 peers.addEventListener('userdisconnected', user => {
     delete video[user];
     delete audio[user];
-    peers.get(user).removeMedia();
+    const connection = peers.get(user);
+    if(connection) connection.removeMedia();
 });
 peers.addEventListener('trackadded', (track, u) => {
     peers.users.forEach(user => {

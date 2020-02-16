@@ -11,6 +11,8 @@ module.exports = (user, room) => {
         }else if(message.receiver === '@server'){
             if(message.type === "user:list"){
                 user.socket.send({type: "user:list", data: room.members.map(m => m.name).filter(m => m !== user.name), receiver: message.sender, sender: "@server"});
+            }else if(message.type === "architecture:switch"){
+                room.architecture = message.data;
             }else{
                 room.env.Tunnel.doImport('message', message)
                     .catch(err => user.socket.send({type: 'error', data: err, sender: '@server', receiver: user.name}));

@@ -1,6 +1,7 @@
 const router = require('express').Router();
 const config = require('../config.js').web;
 const User = require('../logic/User.js');
+const Room = require('../logic/Room.js');
 
 router.post('/session',async (req, res) => {
     const name = req.body.name;
@@ -18,6 +19,7 @@ router.post('/session',async (req, res) => {
 
 router.delete('/session', (req, res) => {
     if(req.session && req.session.user){
+        Room.removeUserEverywhere(req.session.user);
         req.session.destroy();
         res.cookie(config.session.name, '', {expires: new Date()});
         req.session = null;

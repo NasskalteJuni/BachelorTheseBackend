@@ -4,11 +4,9 @@ const roomSocketMessageHandling = require('./user.js');
 module.exports = room => {
     // public rooms are broadcasted over socket
     if(room.public){
-        room.addEventListener('ready', () => {
-            sockets.all.forEach(socket => socket.send({type: 'room:added', data: {name: room.name, id: room.id}, sender: '@server', receiver: '*'}));
-        });
+        sockets.all().forEach(socket => socket.send({type: 'room:added', data: {name: room.name, id: room.id}, sender: '@server', receiver: '*'}));
         room.addEventListener('close', () => {
-            sockets.all.forEach(socket => socket.send({type: 'room:removed', data: {name: room.name, id: room.id}, sender: '@server', receiver: '*'}));
+            sockets.all().forEach(socket => socket.send({type: 'room:removed', data: {name: room.name, id: room.id}, sender: '@server', receiver: '*'}));
         });
     }
     // room members receive updates of server state changes on the room

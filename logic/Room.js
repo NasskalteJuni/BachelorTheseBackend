@@ -18,7 +18,7 @@ class Room extends Listenable(){
      * @param options.creator [string] id of the creating user
      * @param password [string=''] the password. If left empty, the room is public and a password is not necessary
      * @param maxMembers [integer=Infinity] the number of members allowed. Joining after reaching the limit throws an exception
-     * @param maxEmptyMinutes [integer=0] the time that must pass before a room without players is closed down automatically
+     * @param maxEmptyMinutes [integer=0] the time that must pass before a room without members is closed down automatically
      * @param id [string=random id] the id for this Room. Must be unique but is not checked for uniqueness. Better just leave it to the default value
      * @throws Error when options.name is already in use, an Error will be thrown so that a new Room with a unique name should be created
      * */
@@ -42,6 +42,17 @@ class Room extends Listenable(){
     }
 
 
+    /**
+     * @static
+     * kick the user out of any room
+     * */
+    static removeUserEverywhere(user){
+        rooms.forEach(room => {
+            if(room.members.findIndex(member => member.id === user.id) >= 0){
+                room.leave(user);
+            }
+        });
+    }
 
     /**
      * retrieve a Room object with the given id
@@ -88,7 +99,7 @@ class Room extends Listenable(){
      * is it possible to join the Room
      * */
     get joinable(){
-        return this.remainingPlayers > 0;
+        return this.remainingMembers > 0;
     }
 
     /**
@@ -152,9 +163,9 @@ class Room extends Listenable(){
 
     /**
      * @readonly
-     * get the number of players that can still join (can be Infinity)
+     * get the number of members that can still join (can be Infinity)
      * */
-    get remainingPlayers(){
+    get remainingMembers(){
         return this._maxMembers - this._members.length;
     }
 
@@ -203,14 +214,15 @@ class Room extends Listenable(){
      * @param user [User] the leaving Room member
      * */
     leave(user){
-        const i = this.members.findIndex(p => p.id === user.id);
+        const i = this._members.findIndex(p => p.id === user.id);
         if(i >= 0){
-            this.members.splice(i,1);
+            this._members.splice(i,1);
             this.dispatchEvent('leave', [user]);
         }
-        if(this.members.length === 0){
+        if(this._members.length === 0){
+            console.log('room is empty');
             this._closingTimer = setTimeout(() => {
-                if(this.members.length === 0) this.close();
+                if(this._members.length === 0) this.close();
                 this._stopPossibleClosingTimer();
             }, 1000 * 60 * this._maxEmptyMinutes);
         }
@@ -233,6 +245,7 @@ class Room extends Listenable(){
         const i = rooms.findIndex(l => l.id === this._id);
         rooms.splice(i,1);
         this.dispatchEvent('close', [])
+        this._env.destroy().then(() => this.dispatchEvent('closed', [])).catch(console.error);
     }
 
     toJSON(){
@@ -244,8 +257,9 @@ class Room extends Listenable(){
                 name: this._creator.name,
             },
             public: this.public,
+            architecture: this.architecture,
             joinable: this.joinable,
-            maxPlayers: this._maxMembers,
+            maxMembers: this._maxMembers,
             members: this.members.map(m => m.name),
             created: this.created
         }

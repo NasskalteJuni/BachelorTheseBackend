@@ -31,5 +31,6 @@ const bind = server => server.on('upgrade', (req, sock, body) => {
 
 module.exports = {
     bind,
-    all
+    all: () => Object.values(all),
+    get: id => all[id]
 };
