@@ -1,8 +1,9 @@
 const BrowserEnvironment = require('../mediaserver/BrowserEnvironment.js');
-const Listenable = require('../utils/Listenable.js');
 BrowserEnvironment.debug = true;
+const Listenable = require('../utils/Listenable.js');
 const ID = require('./ID.js');
 const rooms = [];
+
 
 /**
  * Rooms are in memory (non-persistent) structures that have 0-n members
@@ -17,12 +18,12 @@ class Room extends Listenable(){
      * @param options.name [string] name of the room. Must be unique, will be checked for uniqueness
      * @param options.creator [string] id of the creating user
      * @param password [string=''] the password. If left empty, the room is public and a password is not necessary
-     * @param maxMembers [integer=Infinity] the number of members allowed. Joining after reaching the limit throws an exception
+     * @param maxMembers [integer=MAX_SAFE_INTEGER] the number of members allowed. Joining after reaching the limit throws an exception
      * @param maxEmptyMinutes [integer=0] the time that must pass before a room without members is closed down automatically
      * @param id [string=random id] the id for this Room. Must be unique but is not checked for uniqueness. Better just leave it to the default value
      * @throws Error when options.name is already in use, an Error will be thrown so that a new Room with a unique name should be created
      * */
-    constructor({name, creator, password='', maxMembers=Infinity, minMembers=0, maxEmptyMinutes=0, id=ID()} = {}){
+    constructor({name, creator, password='', maxMembers=Number.MAX_SAFE_INTEGER, minMembers=0, maxEmptyMinutes=0, id=ID()} = {}){
         super();
         this._created = new Date();
         if(Room.byName(name)) throw new Error('NAME ALREADY IN USE');
@@ -35,9 +36,10 @@ class Room extends Listenable(){
         this._id = id;
         this._maxEmptyMinutes = maxEmptyMinutes;
         this._closingTimer = null;
-        this._env = new BrowserEnvironment(this._id, {template: require.resolve('../mediaserver/template.html'), scripts: ['../public/mediautils.js', '../mediaserver/mediahandling.js']}); // use a page template, alternatively, pass one or multiple scripts with scripts[paths...]
-        this._env.init();
-        this._env.onInitialized = () => this.dispatchEvent('ready', []);
+        this._mcu = new BrowserEnvironment(this._id+'-mcu', {template: require.resolve('../mediaserver/template.html'), scripts: ['../public/mediautils.js', '../mediaserver/mcu.js']}); // use a page template, alternatively, pass one or multiple scripts with scripts[paths...]
+        this._sfu = new BrowserEnvironment(this._id+'-sfu', {template: require.resolve('../mediaserver/template.html'), scripts: ['../public/mediautils.js', '../mediaserver/sfu.js']});
+        this._mcu.init().then(() => this._sfu.init()).catch(err => this.dispatchEvent('error', [err]));
+        this._sfu.onInitialized = () => this.dispatchEvent('ready', []);
         rooms.push(this);
     }
 
@@ -71,11 +73,18 @@ class Room extends Listenable(){
     }
 
     /**
-     * @readonly
      * retrieve a list of rooms without password
+     * @readonly
      * */
     static get public(){
         return rooms.filter(room => room.public);
+    }
+
+    /**
+     *
+     * */
+    static get all(){
+        return rooms;
     }
 
     /**
@@ -88,10 +97,18 @@ class Room extends Listenable(){
 
     /**
      * @readonly
-     * get the browser environment used
+     * get the browser environment used for video mixing on the server
      * */
-    get env(){
-        return this._env;
+    get mcu(){
+        return this._mcu;
+    }
+
+    /**
+     * @readonly
+     * get the browser environment used for video forwarding
+     * */
+    get sfu(){
+        return this._sfu;
     }
 
     /**
@@ -144,6 +161,7 @@ class Room extends Listenable(){
 
     /**
      * get the current Room architecture
+     * @return string
      * */
     get architecture(){
         return this._architecture;
@@ -220,7 +238,6 @@ class Room extends Listenable(){
             this.dispatchEvent('leave', [user]);
         }
         if(this._members.length === 0){
-            console.log('room is empty');
             this._closingTimer = setTimeout(() => {
                 if(this._members.length === 0) this.close();
                 this._stopPossibleClosingTimer();
@@ -244,8 +261,11 @@ class Room extends Listenable(){
         this._members = [];
         const i = rooms.findIndex(l => l.id === this._id);
         rooms.splice(i,1);
-        this.dispatchEvent('close', [])
-        this._env.destroy().then(() => this.dispatchEvent('closed', [])).catch(console.error);
+        this.dispatchEvent('close', []);
+        this._sfu.destroy()
+            .then(() => this._mcu.destroy())
+            .then(() => this.dispatchEvent('closed', []))
+            .catch(console.error);
     }
 
     toJSON(){

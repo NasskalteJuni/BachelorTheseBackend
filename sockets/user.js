@@ -13,10 +13,11 @@ module.exports = (user, room) => {
                 user.socket.send({type: "user:list", data: room.members.map(m => m.name).filter(m => m !== user.name), receiver: message.sender, sender: "@server"});
             }else if(message.type === "architecture:switch"){
                 room.architecture = message.data;
-            }else{
-                room.env.Tunnel.doImport('message', message)
-                    .catch(err => user.socket.send({type: 'error', data: err, sender: '@server', receiver: user.name}));
             }
+        }else if(message.receiver === '@mcu'){
+            room.mcu.Tunnel.doImport('message', message).catch(console.error);
+        }else if(message.receiver === '@sfu'){
+            room.sfu.Tunnel.doImport('message', message).catch(console.error);
         }else if(room.members.findIndex(member => member.name === message.receiver) >= 0){
             const receiver = room.members[room.members.findIndex(member => member.name === message.receiver)];
             receiver.socket.send(message);
@@ -25,14 +26,17 @@ module.exports = (user, room) => {
         }
     });
     // forward messages from the browser environment to the users
-    room.env.Tunnel.onExport('message',message => {
-        if(!message.receiver || message.receiver === '*'){
-            room.members.forEach(member => member.socket.send(message));
-        }else if(room.members.findIndex(member => member.name === message.receiver) >= 0){
-            const receiver = room.members[room.members.findIndex(member => member.name === message.receiver)];
-            receiver.socket.send(message);
-        }else{
-            room.env.Tunnel.doImport({type: 'user:disconnected', data: message.receiver, sender: '@server', receiver: '@server'});
-        }
+    ['sfu', 'mcu'].forEach((server) => {
+        room[server].Tunnel.onExport('message',message => {
+            message.sender = '@'+server;
+            if(!message.receiver || message.receiver === '*'){
+                room.members.forEach(member => member.socket.send(message));
+            }else if(room.members.findIndex(member => member.name === message.receiver) >= 0){
+                const receiver = room.members[room.members.findIndex(member => member.name === message.receiver)];
+                receiver.socket.send(message);
+            }else{
+                room[server].Tunnel.doImport({type: 'user:disconnected', data: message.receiver, sender: '@server', receiver: '@'+server}).catch(console.error);
+            }
+        });
     });
-}
+};

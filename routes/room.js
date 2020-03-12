@@ -16,8 +16,10 @@ const injectRoom = (req, res, next) => {
 };
 
 router.get('/rooms', (req, res) => {
-    const rooms = Room.public.map(room => room.toJSON());
-    res.status(200).json(rooms);
+    let rooms;
+    if(req.query.password) rooms = Room.all.filter(room => room.check(req.query.password) && room.name === req.query.name);
+    else rooms = Room.public.filter(room => req.query.name ? room.name === req.query.name : true);
+    res.status(200).json(rooms.map(room => room.toJSON()));
 });
 
 router.get('/room/:id', injectRoom, (req, res) => {
@@ -40,22 +42,24 @@ router.post('/room/', (req, res) => {
 });
 
 router.post('/room/:id/user', injectRoom, async (req, res) => {
+    const password = req.query.password || req.body.password || '';
     const room = req.room;
     if(!room.joinable) return res.status(401).sendStatusMessage('LOBBY IS FULL');
-    if(!room.public && room.check(req.query.password)) return res.status(401).sendStatusMessage('WRONG PASSWORD');
+    if(!room.public && !room.check(password)) return res.status(401).sendStatusMessage('WRONG PASSWORD');
     try{
-        room.join(req.session.user);
+        room.join(req.session.user, password);
     }catch(err){
-        res.status(422).sendStatusMessage(err.message);
+        return res.status(422).sendStatusMessage(err.message);
     }
     res.status(200).json(room.toJSON());
 });
 
-router.delete('/room/:id/users/:user?', injectRoom, (req, res) => {
+router.delete('/room/:id/user', injectRoom, (req, res) => {
     const room = req.room;
-    const user = room.members.reduce((found, user) => user.id === req.params.user || user.id === req.session.user.id ? user : found, null);
+    const user = room.members.reduce((found, user) => user.id === req.session.user.id ? user : found, null);
     if(!user) return res.status(404).sendStatusMessage('NO SUCH USER');
     room.leave(user);
+    res.status(204).send();
 });
 
 router.delete('/room/:id', injectRoom, (req, res) => {

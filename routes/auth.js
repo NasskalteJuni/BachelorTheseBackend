@@ -12,13 +12,14 @@ router.post('/session',async (req, res) => {
     const user = await User.findOne({where:{name}});
     if(!user) return res.status(403).sendStatusMessage('LOGIN FAILED');
     if(!await user.isPasswordValid(password)) return res.status(403).sendStatusMessage('LOGIN FAILED');
-    await user.updateLastLogin();
     req.session.user = user;
     req.session.save(err => err ? res.status(500).sendStatusMessage('COULD NOT CREATE SESSION') : res.status(200).json({user}));
 });
 
-router.delete('/session', (req, res) => {
+router.delete('/session', async (req, res) => {
     if(req.session && req.session.user){
+        const user = await User.findByPk(req.session.user.id);
+        await user.updateLastLogin();
         Room.removeUserEverywhere(req.session.user);
         req.session.destroy();
         res.cookie(config.session.name, '', {expires: new Date()});

@@ -58,7 +58,7 @@ class Tunnel{
      * */
     async doImport(type, serializable){
         if(this._state === "closed") throw new Error("Tunnel is still closed");
-        return await this._instance.evaluate((_t, _s) => window["Tunnel"]._handleImport(_t, _s), type, JSON.stringify(serializable))
+        return this._instance.evaluate((_t, _s) => window["Tunnel"]._handleImport(_t, _s), type, JSON.stringify(serializable));
     }
 
     /**

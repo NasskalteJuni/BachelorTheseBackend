@@ -17,11 +17,13 @@ app.use(require('helmet')());
 if(app.get('env') !== 'production') app.use(require('cors')({credentials: true, origin: (origin, callback) => callback(null, true)}));
 applyXSRFGuard(app);
 
-
 // import routes
 app.use('/api', require('./routes/auth.js'));
 app.use('/api', require('./routes/user.js'));
 app.use('/api', require('./routes/room.js'));
-app.use('/api', require('./routes/turn.js'));
+app.use('/api', require('./routes/ice.js'));
+
+// error handling routine
+app.use(require('./middleware/errorHandler.js'));
 
 module.exports = app;
