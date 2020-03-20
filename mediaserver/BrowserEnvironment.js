@@ -19,7 +19,7 @@ class BrowserEnvironment extends Listenable(){
     static _getPuppet() {
         if (!BrowserEnvironment._browser) {
             const isDebug = BrowserEnvironment.debug;
-            const flags = ["--allow-insecure-localhost","--autoplay-policy=no-user-gesture-required","--no-user-gesture-required"];
+            const flags = ["--allow-insecure-localhost","--autoplay-policy=no-user-gesture-required","--no-user-gesture-required","--no-sandbox","--disable-setuid-sandbox"];
             if(isDebug) flags.push("--webrtc-event-logging");
             return puppeteer.launch({headless: !isDebug, devtools: isDebug, args: flags}).then(browser => {
                 BrowserEnvironment._browser = browser;
@@ -70,6 +70,11 @@ class BrowserEnvironment extends Listenable(){
             this._isInitialized = true;
             this._onInitializedCb();
             this.dispatchEvent('initialized');
+	    this._instance.on('console', async msg => {
+	        const args = await Promise.all(msg.args().map(arg => arg.jsonValue()));
+		const type = msg.type();
+		this.dispatchEvent('console', [type, args]);
+	    });
         } catch (err) {
             this._errorHandler(err);
             this.dispatchEvent('error');
@@ -89,6 +94,14 @@ class BrowserEnvironment extends Listenable(){
     async destroy() {
         this.dispatchEvent('destroy');
         return this._instance.close();
+    }
+
+    async evaluate(expression){
+	try{
+	    return this._instance.evaluate(_expression => eval(_expression), expression);
+	}catch(err){
+	    return Promise.reject(err.message);	
+	}
     }
 
 }

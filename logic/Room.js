@@ -1,7 +1,8 @@
 const BrowserEnvironment = require('../mediaserver/BrowserEnvironment.js');
-BrowserEnvironment.debug = true;
 const Listenable = require('../utils/Listenable.js');
 const ID = require('./ID.js');
+const createIceServerToken = require('./IceServerTokenMaker.js');
+const connection = require('../persistence/connection.js');
 const rooms = [];
 
 
@@ -14,16 +15,18 @@ class Room extends Listenable(){
 
     /**
      * creates a new Room object according to the given options
-     * @param options (optional) options defining some rules for the room object
-     * @param options.name [string] name of the room. Must be unique, will be checked for uniqueness
-     * @param options.creator [string] id of the creating user
-     * @param password [string=''] the password. If left empty, the room is public and a password is not necessary
-     * @param maxMembers [integer=MAX_SAFE_INTEGER] the number of members allowed. Joining after reaching the limit throws an exception
-     * @param maxEmptyMinutes [integer=0] the time that must pass before a room without members is closed down automatically
-     * @param id [string=random id] the id for this Room. Must be unique but is not checked for uniqueness. Better just leave it to the default value
+     * @param {Object} options Some settings and options to define rules for the room object
+     * @param {string} options.name name of the room. Must be unique, will be checked for uniqueness
+     * @param {string} options.creator id of the creating user
+     * @param {String} [password=''] the password. If left empty, the room is public and a password is not necessary
+     * @param {Number} [maxMembers=MAX_SAFE_INTEGER] the number of members allowed. Joining after reaching the limit throws an exception
+     * @param {Number} [maxEmptyMinutes=0] the time that must pass before a room without members is closed down automatically
+     * @param {Boolean} [consoleToStdout=false] Flag used to forward media server console logs to the process standard output
+     * @param {Boolean} [stdinToEvaluate=false] Flag used to evaluate process standard input in the given media server. Must have form "[roomid] [architecture] [expression to evaluate]", without the brackets
+     * @param {String} [id=random id] the id for this Room. Must be unique but is not checked for uniqueness. Better just leave it to the default value
      * @throws Error when options.name is already in use, an Error will be thrown so that a new Room with a unique name should be created
      * */
-    constructor({name, creator, password='', maxMembers=Number.MAX_SAFE_INTEGER, minMembers=0, maxEmptyMinutes=0, id=ID()} = {}){
+    constructor({name, creator, password='', maxMembers=Number.MAX_SAFE_INTEGER, maxEmptyMinutes=0, id=ID(), consoleToStdout=false, stdinToEvaluate=false} = {}){
         super();
         this._created = new Date();
         if(Room.byName(name)) throw new Error('NAME ALREADY IN USE');
@@ -36,17 +39,77 @@ class Room extends Listenable(){
         this._id = id;
         this._maxEmptyMinutes = maxEmptyMinutes;
         this._closingTimer = null;
-        this._mcu = new BrowserEnvironment(this._id+'-mcu', {template: require.resolve('../mediaserver/template.html'), scripts: ['../public/mediautils.js', '../mediaserver/mcu.js']}); // use a page template, alternatively, pass one or multiple scripts with scripts[paths...]
-        this._sfu = new BrowserEnvironment(this._id+'-sfu', {template: require.resolve('../mediaserver/template.html'), scripts: ['../public/mediautils.js', '../mediaserver/sfu.js']});
+        this._mcu = new BrowserEnvironment(this._id+'-mcu', {template: require.resolve('../mediaserver/template.html'), scripts: ['../public/mediautils.js', '../mediaserver/mcu.js'], globals: {iceServers:[]}}); // use a page template, alternatively, pass one or multiple scripts with scripts[paths...]
+        this._sfu = new BrowserEnvironment(this._id+'-sfu', {template: require.resolve('../mediaserver/template.html'), scripts: ['../public/mediautils.js', '../mediaserver/sfu.js'], globals: {iceServers:[]}});
         this._mcu.init().then(() => this._sfu.init()).catch(err => this.dispatchEvent('error', [err]));
-        this._sfu.onInitialized = () => this.dispatchEvent('ready', []);
+        this._sfu.onInitialized = () => this._configureIceTokens().then(() => this.dispatchEvent('ready')).catch(err => this.dispatchEvent('error', [err]));
+        this.addEventListener('ready', () =>{
+            if(consoleToStdout) this._configureOutputForwarding();
+            if(stdinToEvaluate) this._configureInputForwarding();
+        });
         rooms.push(this);
+    }
+
+    /**
+     * automatically setup ice servers tokens in room
+     * @private
+     * */
+    async _configureIceTokens(){
+        let rows, columns;
+        try{
+            const con = await connection();
+            [rows, columns] = await con.execute('SELECT * FROM turn_secret');
+            const secret = rows[0].value;
+            const mcuIceTokens = [createIceServerToken(this._id + '-mcu', secret, 'stun'), createIceServerToken(this._id + '-mcu', secret, 'turn')];
+            const sfuIceTokens = [createIceServerToken(this._id + '-sfu', secret, 'stun'), createIceServerToken(this._id + '-sfu', secret, 'turn')];
+            await this._sfu.Tunnel.doImport('iceServers', sfuIceTokens);
+            await this._mcu.Tunnel.doImport('iceServers', mcuIceTokens);
+        }catch(err){
+            console.error(err);
+        }finally{
+            this.dispatchEvent('ready', []);
+        }
+    }
+
+
+    /**
+     * forward the console output of the media servers to the current process output
+     * @private
+     * */
+    _configureOutputForwarding(){
+        this._sfu.addEventListener('console', (type, msg) => process.stdout.write(this._id+' sfu-console-'+type+': '+msg.join(',')));
+        this._mcu.addEventListener('console', (type, msg) => process.stdout.write(this._id+' mcu-console-'+type+': '+msg.join(',')));
+    }
+
+    /**
+     * forward process input
+     * @private
+     * */
+    _configureInputForwarding(){
+        require('./ServerInput.js').on('line', async line => {
+            line = line.trim();
+            if(line.startsWith(this._id)){
+                line = line.substr(this._id.length).trim();
+                let evaluated;
+                if(line.startsWith('mcu')){
+                    line = line.substr(3).trim();
+                    evaluated = await this.mcu.evaluate(line);
+                }else if(line.startsWith('sfu')){
+                    line = line.substr(3).trim();
+                    evaluated = await this.sfu.evaluate(line);
+                }else{
+                    evaluated = 'No such server architecture';
+                }
+                process.stdout.write(evaluated+"\n");
+            }
+        })
     }
 
 
     /**
      * @static
      * kick the user out of any room
+     * @param {Object} user the user to remove
      * */
     static removeUserEverywhere(user){
         rooms.forEach(room => {
@@ -58,22 +121,23 @@ class Room extends Listenable(){
 
     /**
      * retrieve a Room object with the given id
-     * @param id [string] the Lobby's id
-     * @return [Room|null] the Lobby or null of no Lobby with the given id was found
+     * @param {String} id the Room's id
+     * @return {Room|null} the Room or null of no Lobby with the given id was found
      * */
     static byId(id){
         return rooms.reduce((found, room) => room.id === id ? room : found, null);
     }
 
     /**
-     * retrieve a Lobby object with the given name
+     * retrieve a Room object with the given name
+     * @param {String} name the name of the Room
      * */
     static byName(name){
         return rooms.reduce((found, room) => room.name === name ? room : found, null);
     }
 
     /**
-     * retrieve a list of rooms without password
+     * The list of rooms without password
      * @readonly
      * */
     static get public(){
@@ -81,87 +145,88 @@ class Room extends Listenable(){
     }
 
     /**
-     *
+     * The list of all rooms
+     * @readonly
      * */
     static get all(){
         return rooms;
     }
 
     /**
-     * @readonly
      * get the Room id
+     * @readonly
      * */
     get id(){
         return this._id;
     }
 
     /**
+     * get the browser environment used for mixing on the server
      * @readonly
-     * get the browser environment used for video mixing on the server
      * */
     get mcu(){
         return this._mcu;
     }
 
     /**
+     * get the browser environment used for forwarding media
      * @readonly
-     * get the browser environment used for video forwarding
      * */
     get sfu(){
         return this._sfu;
     }
 
     /**
+     * is it possible to join the Room at the current time
      * @readonly
-     * is it possible to join the Room
      * */
     get joinable(){
         return this.remainingMembers > 0;
     }
 
     /**
-     * @readonly
      * which users are members of the Room
+     * @readonly
      * */
     get members(){
         return Object.freeze(this._members.slice());
     }
 
     /**
+     * the Date when the Room was created
      * @readonly
-     * get the Date when the Room was created
      * */
     get created(){
         return this._created;
     }
 
     /**
+     * the Room name
      * @readonly
-     * get the Room name
      * */
     get name(){
         return this._name;
     }
 
     /**
+     * the user (more specific, the user id) that created the Room
      * @readonly
-     * get the user (more specific, the user id) that created the Room
      * */
     get creator(){
         return this._creator;
     }
 
     /**
+     * if the Room is public (has no password) or not
      * @readonly
-     * get if the Room is public (has no password) or not
      * */
     get public(){
         return !this._password.length;
     }
 
     /**
-     * get the current Room architecture
-     * @return string
+     * the currently used Room architecture
+     * @readonly
      * */
     get architecture(){
         return this._architecture;
@@ -169,27 +234,33 @@ class Room extends Listenable(){
 
     /**
      * set the architecture
-     * @param architectureToUse [string] an architecture that is either 'mesh', 'sfu' or 'mcu'
+     * @param {String} architectureToUse an architecture that is either 'mesh', 'sfu' or 'mcu'
      * */
     set architecture(architectureToUse){
         architectureToUse = architectureToUse.toLowerCase();
         if(architectureToUse !== this._architecture){
+            try{
+                if(architectureToUse === 'mcu') this._mcu.Tunnel.doImport('activate', [this._members.length]);
+                if(architectureToUse !== 'mcu' && this._architecture === 'mcu') this._mcu.Tunnel.doImport('deactivate', []);
+                if(architectureToUse === 'sfu') this._sfu.Tunnel.doImport('activate', [this._members.length]);
+                if(architectureToUse !== 'sfu' && this._architecture === 'sfu') this._sfu.Tunnel.doImport('deactivate', []);
+            }catch(err){this.dispatchEvent('error', [err])}
             this.dispatchEvent('switch', [architectureToUse, this._architecture]);
             this._architecture = architectureToUse;
         }
     }
 
     /**
-     * @readonly
      * get the number of members that can still join (can be Infinity)
+     * @readonly
      * */
     get remainingMembers(){
         return this._maxMembers - this._members.length;
     }
 
     /**
-     * @private
      * stop the closing countdown
+     * @private
      * */
     _stopPossibleClosingTimer(){
         if(this._closingTimer !== null){
@@ -199,8 +270,8 @@ class Room extends Listenable(){
     }
 
     /**
-     * @private
      * kick user out of other rooms
+     * @private
      * */
     _leaveOtherLobbies(user){
         rooms.forEach(room => {

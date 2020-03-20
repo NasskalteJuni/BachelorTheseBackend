@@ -1,7 +1,6 @@
 const config = require('./config.js').web;
 const express = require('express');
 const app = express();
-const applyXSRFGuard = require('./middleware/applyXSRFGuard.js');
 
 // set application wide variables
 app.set('trust proxy', config.behindProxy);
@@ -15,7 +14,6 @@ app.use(express.static(__dirname+'/public'));
 app.use(express.json());
 app.use(require('helmet')());
 if(app.get('env') !== 'production') app.use(require('cors')({credentials: true, origin: (origin, callback) => callback(null, true)}));
-applyXSRFGuard(app);
 
 // import routes
 app.use('/api', require('./routes/auth.js'));

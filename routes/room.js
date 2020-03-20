@@ -32,13 +32,12 @@ router.post('/room/', (req, res) => {
     const name = req.body.name;
     if(!name) return res.status(422).sendStatusMessage('MISSING NAME PROPERTY');
     if(Room.byName(name)) return res.status(422).sendStatusMessage('NAME ALREADY IN USE');
-    const room = new Room({name, creator: req.session.user, password: req.body.password, maxMembers: req.body.maxMembers || Infinity});
+    const room = new Room({name, creator: req.session.user, password: req.body.password, maxMembers: req.body.maxMembers || Number.MAX_SAFE_INTEGER, stdinToEvaluate: true, consoleToStdout: true});
     // wait for everything to be booted up, then bind handler function and respond
     room.addEventListener('ready',() => {
         res.status(200).json(room.toJSON());
         roomSocketMessageHandling(room);
     });
-    // register the socket stuff for created rooms
 });
 
 router.post('/room/:id/user', injectRoom, async (req, res) => {

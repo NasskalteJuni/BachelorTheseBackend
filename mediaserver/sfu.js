@@ -1,5 +1,15 @@
 const signaler = MediaUtilities.wrapTunnelAsSignaler(Tunnel);
-window.connections = new MediaUtilities.ConnectionManager({name: '@sfu', signaler, isYielding: true, verbose: true});
+const connections = new MediaUtilities.ConnectionManager({name: '@sfu', signaler, isYielding: true, verbose: true});
+
+let isActive = false; // if you start with this architecture, set this to true
+const iceServers = [];
+
+Tunnel.onImport('iceServers', ice => {
+	console.log('iceServers changing from', iceServers, 'to', ice);
+	iceServers.splice(0, iceServers.length);
+	ice.forEach(s => iceServers.push(s));
+});
+
 connections.addEventListener('userconnected', user => {
     connections.users.forEach(u => {
         if(u !== user){
@@ -38,11 +48,14 @@ connections.addEventListener('trackremoved', (track, user) => {
 });
 signaler.addEventListener('message', message => {
     if(message.type === "architecture:switch" && message.sender === "@server"){
-        if(message.data !== "sfu"){
+        if(message.data !== "sfu" && isActive){
             console.log('architecture not sfu - remove media');
+	    isActive = false;
             connections.users.forEach(user => {
                 connections.get(user).removeMedia();
             });
-        }
+        }else if(message.data === "sfu" && isActive){
+	    console.log('architecture is sfu');
+	}
     }
 });

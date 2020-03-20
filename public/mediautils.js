@@ -773,7 +773,7 @@ var MediaUtilities = (function (exports) {
             this._connection.addEventListener('icecandidate', e => this._forwardIceCandidate(e.candidate));
             this._connection.addEventListener('negotiationneeded', () => this._startHandshake());
             this._connection.addEventListener('iceconnectionstatechange', () => this._handleIceChange());
-            this._connection.addEventListener('connectionstatechange', () => this._restartJammedConnectionAttempts());
+            this._connection.addEventListener('signalingstatechange', () => this._restartJammedConnectionAttempts());
             this._connection.addEventListener('track', ({track, streams}) => this._handleIncomingTrack(track, streams));
             this._connection.addEventListener('signalingstatechange', () => this._syncNewTransceivers());
             if (this._verbose) this._logger.log('created new peer connection (' + this._id + ') using ' + (this._connectionConfig.sdpSemantics === 'unified-plan' ? 'the standard' : 'deprecated chrome plan b') + ' sdp semantics');
@@ -1101,13 +1101,14 @@ var MediaUtilities = (function (exports) {
 
         _restartJammedConnectionAttempts(){
             const removeConnectionAttemptTimeout = () => {
-                clearTimeout(this._connectingAttemptTimeout);
+                if(this._connectingAttemptTimeout !== undefined) clearTimeout(this._connectingAttemptTimeout);
                 this._connectingAttemptTimeout = undefined;
             };
-            if(this._connection.connectionState === "connecting"){
+            if(this._connection.signalingState === "have-local-offer"){
                 this._connectingAttemptTimeout = setTimeout(async () => {
                     if(this._verbose) this._logger.log('connection exceeded time to connect and is assumed to be jammed, restarting ice gathering...');
                     removeConnectionAttemptTimeout();
+                    // if still stuck without no answer, rollback and renegotiate
                     if(this._connection.signalingState === "have-local-offer") await this._connection.setLocalDescription({type: "rollback"});
                     this._connection.restartIce();
                     this._connection.dispatchEvent(new Event('negotiationneeded'));
@@ -1364,6 +1365,7 @@ var MediaUtilities = (function (exports) {
             connection.addEventListener('trackadded', (track, mid) => this.dispatchEvent('trackadded', [track, connection.peer, mid]));
             connection.addEventListener('trackremoved', (track, mid) => this.dispatchEvent('trackremoved', [track, connection.peer, mid]));
             connection.addEventListener('close', () => this.dispatchEvent('connectionclosed', [connection.peer, connection]));
+            connection.addEventListener('close', () => this.dispatchEvent('connectionclosed', [connection.peer, connection]));
         }
 
         /**
@@ -1471,7 +1473,6 @@ var MediaUtilities = (function (exports) {
          * @param {Boolean} [remove=false] flag used to remove connections when closing them. Defaults to keeping the closed connections
          * */
         close(remove=false){
-            this._signaler.close();
             Object.keys(this.connections)
                 .forEach(user => {
                     this.connections[user].close();
@@ -2322,6 +2323,22 @@ var MediaUtilities = (function (exports) {
          * */
         get addedTracks(){
            return this.addedMedia.reduce((count, m) => m instanceof MediaStream ? count+m.getTracks().length : count+1, 0);
+        }
+
+        /**
+         * Close down any connections of any used architecture
+         * */
+        close(){
+            [this._peers, this._sfu, this._mcu].forEach(architecture => architecture.close());
+            this._addedMedia = [];
+        }
+
+        /**
+         * A conference is closed if at least one connection in use is closed
+         * @readonly
+         * */
+        get closed(){
+            return ![this._peers, this._sfu, this._mcu].reduce((isClosed, architecture) =>architecture.closed || isClosed, false)
         }
 
     };

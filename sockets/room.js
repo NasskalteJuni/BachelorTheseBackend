@@ -24,9 +24,11 @@ module.exports = room => {
         room.sfu.Tunnel.doImport('message', {type: 'user:disconnected', data: user.name, sender: '@server', receiver: '@sfu'}).catch(console.error);
         room.mcu.Tunnel.doImport('message', {type: 'user:disconnected', data: user.name, sender: '@server', receiver: '@mcu'}).catch(console.error);
     });
-    room.addEventListener('switch', architecture => {
+    room.addEventListener('switch', (architecture) => {
         room.members.forEach(member => member.socket.send({type: 'architecture:switch', data: architecture, sender: '@server', receiver: '*'}));
         room.sfu.Tunnel.doImport('message', {type: 'architecture:switch', data: architecture, sender: '@server', receiver: '@sfu'});
         room.mcu.Tunnel.doImport('message', {type: 'architecture:switch', data: architecture, sender: '@server', receiver: '@mcu'});
+        room.sfu.Tunnel.doImport('message', {type: 'user:list', data: room.members.map(m => m.name), sender: '@server', receiver: '@sfu'});
+        room.mcu.Tunnel.doImport('message', {type: 'user:list', data: room.members.map(m => m.name), sender: '@server', receiver: '@mcu'});
     });
 };
